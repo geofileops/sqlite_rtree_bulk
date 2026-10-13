@@ -1,6 +1,7 @@
 #include <sqlite3.h>
 
 #include <errno.h>
+#include <float.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -81,11 +82,17 @@ static void mbr_component(sqlite3_context *context, int argc,
                           sqlite3_value **argv)
 {
     const int component = *(const int *)sqlite3_user_data(context);
+    const unsigned char *text;
     double bounds[4];
 
     (void)argc;
     if (sqlite3_value_type(argv[0]) == SQLITE_NULL) {
         sqlite3_result_null(context);
+        return;
+    }
+    text = sqlite3_value_text(argv[0]);
+    if (text != NULL && text[0] == '\0') {
+        sqlite3_result_double(context, component < 2 ? DBL_MAX : -DBL_MAX);
         return;
     }
     if (!parse_bounds(argv[0], bounds)) {
@@ -95,11 +102,25 @@ static void mbr_component(sqlite3_context *context, int argc,
     sqlite3_result_double(context, bounds[component]);
 }
 
-static void register_test_mbr(sqlite3 *database)
+static void test_is_empty(sqlite3_context *context, int argc,
+                          sqlite3_value **argv)
+{
+    const unsigned char *text;
+
+    (void)argc;
+    if (sqlite3_value_type(argv[0]) == SQLITE_NULL) {
+        sqlite3_result_null(context);
+        return;
+    }
+    text = sqlite3_value_text(argv[0]);
+    sqlite3_result_int(context, text != NULL && text[0] == '\0');
+}
+
+static void register_test_geometry_functions(sqlite3 *database)
 {
     static const int components[4] = {0, 1, 2, 3};
     static const char *names[4] = {
-        "MbrMinX", "MbrMinY", "MbrMaxX", "MbrMaxY"
+        "ST_MinX", "ST_MinY", "ST_MaxX", "ST_MaxY"
     };
     int i;
 
@@ -108,6 +129,10 @@ static void register_test_mbr(sqlite3 *database)
                 (void *)&components[i], mbr_component, NULL, NULL, NULL) != SQLITE_OK) {
             fail(database, "register test MBR function");
         }
+    }
+    if (sqlite3_create_function_v2(database, "ST_IsEmpty", 1, SQLITE_UTF8,
+            NULL, test_is_empty, NULL, NULL, NULL) != SQLITE_OK) {
+        fail(database, "register test ST_IsEmpty function");
     }
 }
 
@@ -189,22 +214,22 @@ int main(int argc, char **argv)
         fail(database, "memory-limit rollback did not preserve previous index");
     }
 
-    register_test_mbr(database);
+    register_test_geometry_functions(database);
     if (sqlite3_exec(database,
         "CREATE TABLE geom_source(geom TEXT);"
         "INSERT INTO geom_source VALUES ('0,0,1,1'),('-1,-1,2,2'),"
-        "(NULL),('20,30,40,50');",
+        "(NULL),('20,30,40,50'),('');",
         NULL, NULL, NULL) != SQLITE_OK) {
         fail(database, "create geometry test data");
     }
     if (query_int(database,
-        "SELECT rtree_bulk_load_spatialite('idx_geom','geom_source','geom','str')") != 3) {
-        fail(database, "SpatiaLite-mode load row count");
+        "SELECT rtree_bulk_load_table('idx_geom','geom_source','geom','str')") != 3) {
+        fail(database, "table-mode load row count");
     }
     expect_index_ok(database, "idx_geom");
     if (query_int(database, "SELECT count(*) FROM idx_geom") != 3 ||
         query_int(database, "SELECT count(*) FROM idx_geom WHERE id IN (1,2,4)") != 3) {
-        fail(database, "SpatiaLite-mode NULL MBR filtering or rowids");
+        fail(database, "table-mode NULL/empty geometry filtering or rowids");
     }
 
     sqlite3_close(database);

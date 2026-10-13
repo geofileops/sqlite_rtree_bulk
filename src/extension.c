@@ -74,7 +74,7 @@ static int parse_options(sqlite3_context *context, int argc,
 }
 
 static void bulk_load_function(sqlite3_context *context, int argc,
-                               sqlite3_value **argv, int spatialite_mode)
+                               sqlite3_value **argv, int table_mode)
 {
     sqlite3 *database = sqlite3_context_db_handle(context);
     const char *index_name = NULL;
@@ -84,11 +84,11 @@ static void bulk_load_function(sqlite3_context *context, int argc,
     sqlite3_int64 loaded_rows = 0;
     char *generated_sql = NULL;
     RBLoadState state;
-    const int base_arguments = spatialite_mode ? 3 : 2;
+    const int base_arguments = table_mode ? 3 : 2;
     int result;
 
     if (argc < base_arguments || argc > base_arguments + 2) {
-        sqlite3_result_error(context, spatialite_mode
+        sqlite3_result_error(context, table_mode
             ? "expected index_name, source_table, geometry_column, optional algorithm and max_bytes"
             : "expected index_name, select_sql, optional algorithm and max_bytes", -1);
         return;
@@ -102,7 +102,7 @@ static void bulk_load_function(sqlite3_context *context, int argc,
         return;
     }
 
-    if (spatialite_mode) {
+    if (table_mode) {
         const char *table_name = NULL;
         const char *geometry_column = NULL;
         if (read_text_argument(context, argv[1], &table_name,
@@ -112,11 +112,13 @@ static void bulk_load_function(sqlite3_context *context, int argc,
             return;
         }
         generated_sql = sqlite3_mprintf(
-            "SELECT ROWID, MbrMinX(\"%w\"), MbrMinY(\"%w\"), "
-            "MbrMaxX(\"%w\"), MbrMaxY(\"%w\") FROM \"%w\" "
-            "WHERE MbrMinX(\"%w\") IS NOT NULL",
+            "SELECT ROWID, ST_MinX(\"%w\"), ST_MinY(\"%w\"), "
+            "ST_MaxX(\"%w\"), ST_MaxY(\"%w\") FROM \"%w\" "
+            "WHERE \"%w\" IS NOT NULL AND ST_IsEmpty(\"%w\") = 0 "
+            "AND ST_MinX(\"%w\") IS NOT NULL",
             geometry_column, geometry_column, geometry_column,
-            geometry_column, table_name, geometry_column);
+            geometry_column, table_name, geometry_column, geometry_column,
+            geometry_column);
         if (generated_sql == NULL) {
             sqlite3_result_error_nomem(context);
             return;
@@ -154,8 +156,8 @@ static void bulk_load_sql(sqlite3_context *context, int argc,
     bulk_load_function(context, argc, argv, 0);
 }
 
-static void bulk_load_spatialite_sql(sqlite3_context *context, int argc,
-                                     sqlite3_value **argv)
+static void bulk_load_table_sql(sqlite3_context *context, int argc,
+                                sqlite3_value **argv)
 {
     bulk_load_function(context, argc, argv, 1);
 }
@@ -174,7 +176,7 @@ RB_EXTENSION_EXPORT int sqlite3_rtreebulkload_init(
         NULL, NULL, NULL);
     if (result != SQLITE_OK) return result;
     return sqlite3_create_function_v2(
-        database, "rtree_bulk_load_spatialite", -1,
-        SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, bulk_load_spatialite_sql,
+        database, "rtree_bulk_load_table", -1,
+        SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, bulk_load_table_sql,
         NULL, NULL, NULL);
 }
