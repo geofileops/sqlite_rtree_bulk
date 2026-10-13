@@ -4,6 +4,21 @@ A loadable SQLite extension for building 2D floating-point RTree indexes. `str`
 uses deterministic Sort-Tile-Recursive packing. `rstar` uses the vendored
 RTree bulk builder from Even Rouault, with SQLite's shadow-table serializer.
 
+Based on some rough tests it seems that the performance gain of `str` doesn't
+seem worth the hassle of maintaining an extra implementation.
+
+Performance test on nz_building_outlines:
+
+```
+-- for nz_building_outlines
+--   - with 'str': 9,8s
+--   - with 'rstar': 10,3s
+SELECT rtree_bulk_load_table(
+  'rtree_nz_building_outlines_geom', 'nz_building_outlines', 'geom', 'str', 1073741824
+);
+```
+
+
 ## Build
 
 Requirements: CMake 3.20+, a C99 compiler, and SQLite 3.31+ development headers
