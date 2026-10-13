@@ -27,38 +27,45 @@ The functions are registered as `SQLITE_DIRECTONLY` because they replace
 database schema objects. Enable extension loading only for trusted extension
 files, then load `rtreebulkload` through the host's normal extension loader.
 
+The functions have these signatures:
+
+- `rtree_bulk_load(index_name, select_sql [, algorithm [, max_bytes]])`
+- `rtree_bulk_load_table(index_name, source_table, geometry_column [, algorithm [, max_bytes]])`
+
+Parameters:
+
+- `index_name`: name of the RTree virtual table to create or replace.
+- `select_sql`: a single read-only query returning five columns in this order:
+  integer ID, minimum X, minimum Y, maximum X, maximum Y. IDs must be unique;
+  bounds must be numeric, finite, ordered, and representable as 32-bit floats.
+- `source_table` and `geometry_column`: the table and geometry column used by
+  `rtree_bulk_load_table`. It uses each row's `ROWID` as the RTree entry
+  ID, so the table must not be `WITHOUT ROWID`. The `ST_MinX`, `ST_MinY`,
+  `ST_MaxX`, `ST_MaxY`, and `ST_IsEmpty` functions must already be registered
+  on the SQLite connection. Rows with `NULL` or empty geometries, or whose
+  `ST_MinX` is `NULL`, are skipped. The extension does not link against
+  SpatiaLite.
+- `algorithm`: optional; `str` by default, or `rstar` (case-insensitive).
+- `max_bytes`: optional memory limit, defaulting to 256 MiB. `0` disables the
+  limit. It accounts for the extension's tracked allocations and the RStar
+  builder's estimated memory, but not SQLite's internal statement/page caches.
+
+Both functions return the number of indexed rows.
+
 ```sql
 SELECT rtree_bulk_load(
   'idx_features',
   'SELECT id, minx, miny, maxx, maxy FROM feature_bounds',
-  'str',
-  268435456
+  'str'
 );
 ```
-
-The general source query must be a single read-only query returning five
-columns in this exact order: integer ID, minimum X, minimum Y, maximum X,
-maximum Y. IDs must be unique. Bounds must be numeric, finite, ordered, and
-representable as 32-bit floats. The function returns the number of indexed
-rows.
-
-The SpatiaLite convenience entry point derives those bounds from a geometry
-column and the rowid:
 
 ```sql
-SELECT rtree_bulk_load_spatialite(
-  'idx_roads_geom', 'roads', 'geom', 'str', 268435456
+SELECT rtree_bulk_load_table(
+  'idx_roads_geom', 'roads', 'geom', 'str'
 );
 ```
 
-It calls `MbrMinX`, `MbrMinY`, `MbrMaxX`, and `MbrMaxY` already registered on
-that SQLite connection. Rows whose `MbrMinX` is `NULL` are skipped. It does not
-link against SpatiaLite.
-
-The algorithm is optional and defaults to `str`; accepted values are `str` and
-`rstar`, case-insensitively. `max_bytes` defaults to 256 MiB; `0` disables the
-limit. The limit accounts for the extension's tracked allocations and the
-RStar builder's estimated memory, not SQLite's internal statement/page caches.
 The source records must fit in memory for either algorithm. If the RStar
 builder reaches the remaining budget, it serializes the packed prefix and
 inserts the remaining records through SQLite's RTree virtual table.
