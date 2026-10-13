@@ -59,3 +59,13 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Upload Windows binaries
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rtreebulkload-windows-x64
+          path: |
+            build/Release/rtreebulkload.dll
+            build/Release/rtreebulkload_test.exe
+          if-no-files-found: error
